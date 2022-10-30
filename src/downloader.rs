@@ -44,7 +44,7 @@ impl Downloader {
         .param("expansions", "attachments.media_keys")
         .param("media.fields", "url")
         .param("tweet.fields", "created_at,author_id")
-        .param("max_results", "5")
+        .param("max_results", "50")
         .get_url();
         let headers = self.tweet_auth_header();
 

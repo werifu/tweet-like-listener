@@ -50,7 +50,6 @@ freq = 5
 dir = './pic'
 "#;
 
-
 #[tokio::main]
 async fn main() -> Result<()> {
     env_logger::init();
@@ -63,6 +62,7 @@ async fn main() -> Result<()> {
                 info!("{:?} is not a dir", dir);
                 exit(0);
             }
+            info!("start to get user id by usernames");
             let usernames = config
                 .twitter
                 .usernames
@@ -73,39 +73,50 @@ async fn main() -> Result<()> {
             let users = match downloader.get_users_by_usernames(usernames).await {
                 Ok(users) => users,
                 Err(err) => {
-                    error!("usernames maybe wrong.\nerr: {:#?}", err);
+                    error!("usernames maybe wrong or you may not reach twitter.\nPlease check your config and net.\nerr: {:#?}", err);
                     exit(1);
                 }
             };
 
             loop {
                 for user in users.iter() {
-                    let likes = downloader.get_likes(user.id.clone()).await.unwrap();
-                    println!("get likes: {:#?}", likes);
-                    for (filename, url) in likes.iter() {
-                        let full_path = dir.join(filename);
-                        if full_path.exists() {
-                            println!("file {:?} exists", full_path);
-                            continue;
+                    match downloader.get_likes(user.id.clone()).await {
+                        Ok(likes) => {
+                            info!(
+                                "{} get {} likes",
+                                chrono::Utc::now().format("%Y-%m-%d %H:%M:%S"),
+                                likes.len()
+                            );
+                            for (filename, url) in likes.iter() {
+                                let full_path = dir.join(filename);
+                                if full_path.exists() {
+                                    continue;
+                                }
+                                match reqwest::Client::new().get(url).send().await {
+                                    Ok(img_bytes) => {
+                                        let img_bytes = img_bytes.bytes().await.unwrap();
+                                        let mut f = File::create(full_path).unwrap();
+                                        f.write(&img_bytes).unwrap();
+                                    }
+                                    Err(err) => {
+                                        error!("download file error: {:?}", err);
+                                    }
+                                }
+                            }
                         }
-                        let img_bytes = reqwest::Client::new()
-                            .get(url)
-                            .send()
-                            .await
-                            .unwrap()
-                            .bytes()
-                            .await
-                            .unwrap();
-                        println!("fullpath: {:?}", full_path);
-                        let mut f = File::create(full_path).unwrap();
-                        f.write(&img_bytes).unwrap();
+                        Err(err) => {
+                            error!("error happened, err: {:?}", err);
+                        }
                     }
                 }
                 sleep(Duration::from_secs(config.twitter.freq)).await;
             }
         }
         Err(err) => {
-            println!("config file is not found, {:#?}", err);
+            info!(
+                "config file is not found, a new config.toml is to be created. err: {:#?}",
+                err
+            );
             let mut file = File::create("./config.toml").unwrap();
             file.write_all(CONFIG_CONTENT.as_bytes()).unwrap();
         }
