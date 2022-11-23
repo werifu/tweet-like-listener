@@ -44,5 +44,17 @@ pub struct TweetResp {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct UserResp {
-    pub data: Vec<User>,
+    pub data: Option<Vec<User>>,
+    pub errors: Option<Vec<UserErr>>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct UserErr {
+    pub value: String,
+    pub detail: String,
+    pub title: String,
+    pub resource_type: String,
+    pub parameter: String,
+    pub resource_id: String,
+    pub r#type: String,
 }

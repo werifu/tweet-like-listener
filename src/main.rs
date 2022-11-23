@@ -1,4 +1,4 @@
-use downloader::Downloader;
+use downloader::{Downloader, TIMEOUT};
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
@@ -11,7 +11,7 @@ use std::{
     process::exit,
     time::Duration,
 };
-use tokio::time::sleep; // 1.3.1
+use tokio::{task, time::sleep}; // 1.3.1
 
 mod downloader;
 mod model;
@@ -40,20 +40,35 @@ const CONFIG_CONTENT: &str = r#"
 # access_key of your application
 access_key = 'your twitter access_key'
 
-# usernames you would like to listen
+# usernames you would like to listen, with prefix '@'
 usernames = ['@werifu_']
 
 # request frequency. unit: 1 second
 freq = 5
 
 [storage]
+# the dir that stores images
 dir = './pic'
 "#;
 
 #[tokio::main]
 async fn main() -> Result<()> {
     env_logger::init();
-
+    // check the network
+    tokio::spawn(async {
+        loop {
+            let res = reqwest::Client::new().get("https://twitter.com").timeout(TIMEOUT).send().await;
+            match res {
+                Ok(_) => {
+                    info!("ping Twitter ok");
+                },
+                Err(_) => {
+                    error!("ping Twitter failed. You may not reach twitter. (tips tor China Mainland users: check your proxy)");
+                }
+            };
+            sleep(Duration::from_secs(10)).await;
+        }
+    });
     match fs::read_to_string("./config.toml") {
         Ok(config_str) => {
             let config: Config = toml::from_str(&config_str).unwrap();
@@ -72,11 +87,12 @@ async fn main() -> Result<()> {
             let mut downloader = Downloader::new(config.twitter.access_key);
             let users = match downloader.get_users_by_usernames(usernames).await {
                 Ok(users) => users,
-                Err(err) => {
-                    error!("usernames maybe wrong or you may not reach twitter.\nPlease check your config and net.\nerr: {:#?}", err);
+                Err(_) => {
+                    error!("You may not reach twitter. Please check your config and net. (tips tor China Mainland users: check your proxy)");
                     exit(1);
                 }
             };
+            info!("ok users: {:?}", users);
 
             loop {
                 for user in users.iter() {
@@ -87,21 +103,31 @@ async fn main() -> Result<()> {
                                 chrono::Utc::now().format("%Y-%m-%d %H:%M:%S"),
                                 likes.len()
                             );
+                            let mut handles = vec![];
                             for (filename, url) in likes.iter() {
-                                let full_path = dir.join(filename);
+                                let filename = filename.clone();
+                                let url = url.clone();
+                                let full_path = dir.join(&filename);
                                 if full_path.exists() {
                                     continue;
                                 }
-                                match reqwest::Client::new().get(url).send().await {
-                                    Ok(img_bytes) => {
-                                        let img_bytes = img_bytes.bytes().await.unwrap();
-                                        let mut f = File::create(full_path).unwrap();
-                                        f.write(&img_bytes).unwrap();
+                                // download pictures concurrently
+                                handles.push(task::spawn(async move {
+                                    match reqwest::Client::new().get(url).send().await {
+                                        Ok(img_bytes) => {
+                                            let img_bytes = img_bytes.bytes().await.unwrap();
+                                            let mut f = File::create(full_path).unwrap();
+                                            f.write(&img_bytes).unwrap();
+                                        }
+                                        Err(err) => {
+                                            error!("download file {} error: {:?}", filename, err);
+                                        }
                                     }
-                                    Err(err) => {
-                                        error!("download file error: {:?}", err);
-                                    }
-                                }
+                                }));
+                            }
+                            // await for all download tasks
+                            for handle in handles {
+                                let _ = handle.await;
                             }
                         }
                         Err(err) => {

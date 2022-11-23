@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::process::exit;
+use std::time::Duration;
 
 use hyper::http::HeaderValue;
 use hyper::{HeaderMap, StatusCode};
@@ -7,7 +8,10 @@ use hyper::{HeaderMap, StatusCode};
 use crate::model::{Attachments, Media, Tweet, TweetResp, User, UserResp};
 use crate::url::UrlBuilder;
 use crate::Result;
-use log::{error, debug};
+use log::{debug, error};
+
+pub const TIMEOUT: Duration = Duration::from_secs(6);
+
 pub struct Downloader {
     pub user_cache: HashMap<String, User>,
     pub user_ids: Vec<String>,
@@ -48,7 +52,12 @@ impl Downloader {
         .get_url();
         let headers = self.tweet_auth_header();
 
-        let resp = client.get(url).headers(headers).send().await?;
+        let resp = client
+            .get(url)
+            .headers(headers)
+            .timeout(TIMEOUT)
+            .send()
+            .await?;
         if resp.status() == StatusCode::UNAUTHORIZED {
             error!("401: Maybe you have a wrong access_key");
             exit(1);
@@ -127,8 +136,21 @@ impl Downloader {
             error!("401: Maybe you have a wrong access_key");
             exit(1);
         }
+
         let resp = resp.json::<UserResp>().await?;
-        Ok(resp.data)
+        if let Some(errs) = resp.errors {
+            error!(
+                "{}",
+                errs.iter()
+                    .map(|err| err.detail.clone())
+                    .collect::<Vec<String>>()
+                    .join(";")
+            );
+        }
+        if let Some(users) = resp.data {
+            return Ok(users);
+        }
+        Ok(vec![])
     }
 
     pub async fn get_users_by_usernames(&self, usernames: Vec<&str>) -> Result<Vec<User>> {
@@ -138,14 +160,27 @@ impl Downloader {
         let resp = client
             .get(url)
             .headers(self.tweet_auth_header())
+            .timeout(TIMEOUT)
             .send()
             .await?;
         if resp.status() == StatusCode::UNAUTHORIZED {
-            error!("401: Maybe you have a wrong access_key");
+            error!("401: Maybe you have a wrong access_key, please check your config.toml");
             exit(1);
         }
         let resp = resp.json::<UserResp>().await?;
-        Ok(resp.data)
+        if let Some(errs) = resp.errors {
+            error!(
+                "{}",
+                errs.iter()
+                    .map(|err| err.detail.clone())
+                    .collect::<Vec<String>>()
+                    .join(";")
+            );
+        }
+        if let Some(users) = resp.data {
+            return Ok(users);
+        }
+        Ok(vec![])
     }
 }
 
