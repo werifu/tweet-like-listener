@@ -14,4 +14,11 @@
 5. 填写 config.toml 文件
 6. 再次执行应用，并使用任意方式让其能一直跑下去
 
+## 注意事项
+* 下载图片命名规则：
+```
+yyyy-mm-dd.name.@username.tweet_id.idx.(jpg|png)
+```
+如 `2022-10-21.ASK.@askziye.1583434009488420865.0.jpg` 表示 ASK 老师在 2022-10-21 的某条推特的第一张图 (0-indexed)，链接为`https://twitter.com/askziye/status/1583434009488420865`
 
+* 懒得做分页，轮询一次最多五十条点赞，请按自己需求控制轮询频率
